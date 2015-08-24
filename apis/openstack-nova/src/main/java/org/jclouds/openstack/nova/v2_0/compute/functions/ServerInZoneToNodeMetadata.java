@@ -16,27 +16,12 @@
  */
 package org.jclouds.openstack.nova.v2_0.compute.functions;
 
-import static com.google.common.base.Preconditions.checkNotNull;
-import static com.google.common.base.Preconditions.checkState;
-import static com.google.common.base.Predicates.not;
-import static com.google.common.collect.Iterables.filter;
-import static com.google.common.collect.Iterables.find;
-import static com.google.common.collect.Iterables.transform;
-import static com.google.common.collect.Sets.newHashSet;
-import static org.jclouds.compute.util.ComputeServiceUtils.addMetadataAndParseTagsFromCommaDelimitedValue;
-import static org.jclouds.compute.util.ComputeServiceUtils.groupFromMapOrName;
-import static org.jclouds.openstack.nova.v2_0.domain.Address.createV4;
-import static org.jclouds.openstack.nova.v2_0.domain.Address.createV6;
-
-import java.net.Inet4Address;
-import java.util.Map;
-import java.util.NoSuchElementException;
-import java.util.Set;
-
-import javax.annotation.Resource;
-import javax.inject.Inject;
-import javax.inject.Named;
-
+import com.google.common.base.Function;
+import com.google.common.base.Predicate;
+import com.google.common.base.Supplier;
+import com.google.common.collect.FluentIterable;
+import com.google.common.collect.Iterables;
+import com.google.common.net.InetAddresses;
 import org.jclouds.collect.Memoized;
 import org.jclouds.compute.domain.ComputeMetadata;
 import org.jclouds.compute.domain.Hardware;
@@ -58,10 +43,27 @@ import org.jclouds.openstack.nova.v2_0.domain.zonescoped.ZoneAndId;
 import org.jclouds.openstack.v2_0.domain.Link;
 import org.jclouds.util.InetAddresses2;
 
-import com.google.common.base.Function;
-import com.google.common.base.Predicate;
-import com.google.common.base.Supplier;
-import com.google.common.net.InetAddresses;
+import javax.annotation.Resource;
+import javax.inject.Inject;
+import javax.inject.Named;
+import java.net.Inet4Address;
+import java.net.Inet6Address;
+import java.util.Map;
+import java.util.NoSuchElementException;
+import java.util.Set;
+
+import static com.google.common.base.Preconditions.checkNotNull;
+import static com.google.common.base.Preconditions.checkState;
+import static com.google.common.base.Predicates.not;
+import static com.google.common.collect.FluentIterable.from;
+import static com.google.common.collect.Iterables.filter;
+import static com.google.common.collect.Iterables.find;
+import static com.google.common.collect.Iterables.transform;
+import static com.google.common.collect.Sets.newHashSet;
+import static org.jclouds.compute.util.ComputeServiceUtils.addMetadataAndParseTagsFromCommaDelimitedValue;
+import static org.jclouds.compute.util.ComputeServiceUtils.groupFromMapOrName;
+import static org.jclouds.openstack.nova.v2_0.domain.Address.createV4;
+import static org.jclouds.openstack.nova.v2_0.domain.Address.createV6;
 
 /**
  * A function for transforming a nova-specific Server into a generic
@@ -119,12 +121,16 @@ public class ServerInZoneToNodeMetadata implements Function<ServerInZone, NodeMe
          addresses.add(createV6(from.getAccessIPv6()));
       }
 
-      builder.publicAddresses(
-            filter(
-                  transform(
-                        filter(addresses, not(isPrivateAddress)),
+        Iterable<String> filterIpv4 = filter(
+                transform(filter(addresses, not(isPrivateAddress)),
                         AddressToStringTransformationFunction.INSTANCE),
-                  isInet4Address));
+                isInet4Address);
+
+        FluentIterable<String> filterIpv6 = from(addresses)
+                .transform(AddressToStringTransformationFunction.INSTANCE)
+                .filter(isInet6Address());
+
+        builder.publicAddresses(Iterables.concat(filterIpv4, filterIpv6));
 
       builder.privateAddresses(
             filter(
@@ -162,6 +168,14 @@ public class ServerInZoneToNodeMetadata implements Function<ServerInZone, NodeMe
 
    };
 
+    public static Predicate<String> isInet6Address() {
+        return new Predicate<String>() {
+            @Override
+            public boolean apply(String input) {
+                return InetAddresses.forString(input) instanceof Inet6Address;
+            }
+        };
+    }
    private enum AddressToStringTransformationFunction implements Function<Address, String> {
       INSTANCE;
       @Override
